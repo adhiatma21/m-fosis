@@ -359,19 +359,30 @@ export default function AnalisaAiPage({ driveToken, connectGoogleDrive, refreshG
         const textTarget = targetPerangkat.toUpperCase().trim();
         addLog(`[KONDISI A] Formulir terisi: Tipe alpro ${tipeAlpro}, Perangkat target: ${textTarget}`);
         
+        // Ketentuan 2: Sebelum fetch file KML, cek localStorage. Jika token masih valid, langsung gunakan!
         let tokenToUse = driveToken;
+        const localToken = localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
+        const localExpiryStr = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
+        const localExpiry = localExpiryStr ? parseInt(localExpiryStr, 10) : null;
+        if (localToken && (!localExpiry || Date.now() < localExpiry)) {
+          tokenToUse = localToken;
+        }
+
         if (!tokenToUse) {
-          addLog("Google Drive tidak terhubung, mencoba meminta autentikasi otomatis...");
+          addLog("Google Drive belum terhubung atau token kedaluwarsa, mencoba menyegarkan sesi...");
           try {
             if (refreshGoogleAccessToken) {
               tokenToUse = await refreshGoogleAccessToken();
             }
-            if (!tokenToUse) {
-              tokenToUse = await connectGoogleDrive(true);
+            // Ketentuan 4: Hanya panggil pop-up OAuth jika token belum ada/expired
+            if (!tokenToUse && connectGoogleDrive) {
+              tokenToUse = await connectGoogleDrive(false);
             }
-            addLog("✓ Berhasil terhubung ke Google Drive!");
+            if (tokenToUse) {
+              addLog("✓ Berhasil terhubung ke Google Drive!");
+            }
           } catch (err) {
-            addLog("⚠️ Meminta autentikasi Google Drive ditolak atau gagal. Menggunakan mode simulasi pencarian lokal folder...");
+            addLog("⚠️ Autentikasi Google Drive gagal atau dibatalkan.");
           }
         }
 
@@ -406,8 +417,9 @@ export default function AnalisaAiPage({ driveToken, connectGoogleDrive, refreshG
             let searchRes = await fetch("/api/drive/search-kml", {
               method: "POST",
               headers: {
-                "Content-Type": "application/json"
-               },
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${tokenToUse}`
+              },
               body: JSON.stringify({
                 accessToken: tokenToUse,
                 segment: tipeAlpro,
@@ -417,17 +429,21 @@ export default function AnalisaAiPage({ driveToken, connectGoogleDrive, refreshG
               })
             });
 
-            // JIKA TOKEN KEDALUWARSA (401), SEGERAKAN SEBELUM GAGAL
-            if (!searchRes.ok && searchRes.status === 401 && refreshGoogleAccessToken) {
-              addLog("Sesi Google Drive kedaluwarsa (401). Mencoba menyegarkan token di latar belakang...");
-              const refreshedToken = await refreshGoogleAccessToken();
+            // Ketentuan 4: JIKA TOKEN KEDALUWARSA (401), REFRESH ATAU PANGGIL POP-UP LALU RETRY
+            if (!searchRes.ok && searchRes.status === 401) {
+              addLog("Sesi Google Drive kedaluwarsa (401). Memperbarui sesi...");
+              let refreshedToken = refreshGoogleAccessToken ? await refreshGoogleAccessToken() : null;
+              if (!refreshedToken && connectGoogleDrive) {
+                refreshedToken = await connectGoogleDrive(false);
+              }
               if (refreshedToken) {
                 tokenToUse = refreshedToken;
-                addLog("✓ Sesi baru diperoleh otomatis. Mengulangi pencarian...");
+                addLog("✓ Sesi baru diperoleh. Mengulangi pencarian...");
                 searchRes = await fetch("/api/drive/search-kml", {
                   method: "POST",
                   headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${tokenToUse}`
                   },
                   body: JSON.stringify({
                     accessToken: tokenToUse,
@@ -443,67 +459,108 @@ export default function AnalisaAiPage({ driveToken, connectGoogleDrive, refreshG
             if (searchRes.ok) {
               const searchData = await searchRes.json();
               if (searchData.files && searchData.files.length > 0) {
-                const targetFile = searchData.files[0];
-                addLog(`✓ Berkas KML ditemukan: "${targetFile.name}" (ID: ${targetFile.id})`);
-                addLog("Mengunduh berkas KML...");
-                
-                let dlRes;
-                if (targetFile.id && (targetFile.id.startsWith('simulated-') || targetFile.id.includes('simulated'))) {
-                  dlRes = await fetch(`/api/drive/download-simulated-kml?name=${encodeURIComponent(targetFile.name)}`);
-                } else {
-                  const dlUrl = `https://www.googleapis.com/drive/v3/files/${targetFile.id}?alt=media`;
-                  dlRes = await fetch(dlUrl, {
-                    headers: { 'Authorization': `Bearer ${tokenToUse}` }
-                  });
+                const lines: any[] = [];
+                const points: any[] = [];
 
-                  // JIKA TOKEN KEDALUWARSA SAAT DOWNLOAD, SEGERAKAN SEBELUM GAGAL
-                  if (!dlRes.ok && dlRes.status === 401 && refreshGoogleAccessToken) {
-                    addLog("Sesi Google Drive kedaluwarsa (401) saat mengunduh. Mencoba menyegarkan token...");
-                    const refreshedToken = await refreshGoogleAccessToken();
-                    if (refreshedToken) {
-                      tokenToUse = refreshedToken;
-                      addLog("✓ Token berhasil disegarkan. Mengulangi pengunduhan berkas...");
-                      dlRes = await fetch(dlUrl, {
-                        headers: { 'Authorization': `Bearer ${tokenToUse}` }
+                for (const targetFile of searchData.files) {
+                  addLog(`Mengunduh berkas KML: "${targetFile.name}"...`);
+                  
+                  let dlRes;
+                  if (targetFile.id && (targetFile.id.startsWith('simulated-') || targetFile.id.includes('simulated'))) {
+                    dlRes = await fetch(`/api/drive/download-simulated-kml?name=${encodeURIComponent(targetFile.name)}`);
+                  } else {
+                    const dlUrl = `https://www.googleapis.com/drive/v3/files/${targetFile.id}?alt=media`;
+                    dlRes = await fetch(dlUrl, {
+                      headers: { 'Authorization': `Bearer ${tokenToUse}` }
+                    });
+
+                    // Ketentuan 4: JIKA TOKEN KEDALUWARSA SAAT DOWNLOAD, REFRESH/POP-UP LALU RETRY
+                    if (!dlRes.ok && dlRes.status === 401) {
+                      addLog("Sesi Google Drive kedaluwarsa (401) saat mengunduh. Memperbarui sesi...");
+                      let refreshedToken = refreshGoogleAccessToken ? await refreshGoogleAccessToken() : null;
+                      if (!refreshedToken && connectGoogleDrive) {
+                        refreshedToken = await connectGoogleDrive(false);
+                      }
+                      if (refreshedToken) {
+                        tokenToUse = refreshedToken;
+                        addLog("✓ Token berhasil diperbarui. Mengulangi pengunduhan berkas...");
+                        dlRes = await fetch(dlUrl, {
+                          headers: { 'Authorization': `Bearer ${tokenToUse}` }
+                        });
+                      }
+                    }
+                  }
+
+                  if (dlRes && dlRes.ok) {
+                    const kmlText = await dlRes.text();
+                    const cleanFileName = targetFile.name.replace(/\.kml$/i, '').trim();
+                    const isOdcFile = cleanFileName.toUpperCase().startsWith('ODC-') || cleanFileName.toUpperCase().startsWith('ODC_');
+                    
+                    // XML Parsing
+                    const parser = new DOMParser();
+                    const kmlDom = parser.parseFromString(kmlText, 'text/xml');
+                    const geoJson = toGeoJSON.kml(kmlDom);
+                    
+                    const fileLines: any[] = [];
+                    const filePoints: any[] = [];
+                    
+                    const processGeometry = (geometry: any, properties: any) => {
+                      if (!geometry) return;
+                      if (geometry.type === 'LineString' || geometry.type === 'MultiLineString') {
+                        fileLines.push({ geometry, properties });
+                      } else if (geometry.type === 'Point') {
+                        filePoints.push({ geometry, properties });
+                      } else if (geometry.type === 'Polygon') {
+                        if (geometry.coordinates && geometry.coordinates.length > 0) {
+                          fileLines.push({ geometry: { type: 'LineString', coordinates: geometry.coordinates[0] }, properties });
+                        }
+                      } else if (geometry.type === 'GeometryCollection') {
+                        (geometry.geometries || []).forEach((g: any) => processGeometry(g, properties));
+                      }
+                    };
+    
+                    const processFeature = (feature: any) => {
+                      if (!feature) return;
+                      if (feature.type === 'Feature') {
+                        processGeometry(feature.geometry, feature.properties);
+                      } else if (feature.type === 'FeatureCollection') {
+                        (feature.features || []).forEach(processFeature);
+                      }
+                    };
+                    processFeature(geoJson);
+
+                    if (isOdcFile) {
+                      if (filePoints.length === 0) {
+                        const coordMatch = kmlText.match(/<coordinates>([\s\S]*?)<\/coordinates>/i);
+                        if (coordMatch && coordMatch[1]) {
+                          const coordParts = coordMatch[1].trim().split(/[\s,]+/);
+                          if (coordParts.length >= 2) {
+                            const lng = parseFloat(coordParts[0]);
+                            const lat = parseFloat(coordParts[1]);
+                            if (!isNaN(lat) && !isNaN(lng)) {
+                              filePoints.push({
+                                geometry: { type: 'Point', coordinates: [lng, lat] },
+                                properties: { name: cleanFileName }
+                              });
+                            }
+                          }
+                        }
+                      }
+                      filePoints.forEach((p: any) => {
+                        if (!p.properties) p.properties = {};
+                        const currName = (p.properties.name || '').trim();
+                        if (!currName || !currName.toUpperCase().includes('ODC')) {
+                          p.properties.name = cleanFileName;
+                        }
                       });
                     }
+
+                    lines.push(...fileLines);
+                    points.push(...filePoints);
                   }
                 }
 
-                if (dlRes.ok) {
-                  const kmlText = await dlRes.text();
-                  addLog("✓ Berhasil mengunduh berkas KML. Memulai parsing XML KML di latar belakang...");
-                  
-                  // XML Parsing
-                  const parser = new DOMParser();
-                  const kmlDom = parser.parseFromString(kmlText, 'text/xml');
-                  const geoJson = toGeoJSON.kml(kmlDom);
-                  
-                  const lines: any[] = [];
-                  const points: any[] = [];
-                  
-                  const processGeometry = (geometry: any, properties: any) => {
-                    if (!geometry) return;
-                    if (geometry.type === 'LineString' || geometry.type === 'MultiLineString') {
-                      lines.push({ geometry, properties });
-                    } else if (geometry.type === 'Point') {
-                      points.push({ geometry, properties });
-                    } else if (geometry.type === 'GeometryCollection') {
-                      (geometry.geometries || []).forEach((g: any) => processGeometry(g, properties));
-                    }
-                  };
-  
-                  const processFeature = (feature: any) => {
-                    if (!feature) return;
-                    if (feature.type === 'Feature') {
-                      processGeometry(feature.geometry, feature.properties);
-                    } else if (feature.type === 'FeatureCollection') {
-                      (feature.features || []).forEach(processFeature);
-                    }
-                  };
-                  processFeature(geoJson);
-
-                  addLog(`✓ Terdeteksi ${lines.length} LineString rute kabel fisik dan ${points.length} Placemark alpro KML.`);
+                addLog(`✓ Terdeteksi ${lines.length} LineString rute kabel fisik dan ${points.length} Placemark alpro KML.`);
 
                   if (lines.length > 0) {
                     addLog("Menghitung rute kabel utama...");
@@ -548,8 +605,7 @@ export default function AnalisaAiPage({ driveToken, connectGoogleDrive, refreshG
                   }
                 }
               }
-            }
-          } catch (e: any) {
+            } catch (e: any) {
             addLog(`⚠️ Gagal fetch rute dari Google Drive: ${e.message || e}`);
           }
         }

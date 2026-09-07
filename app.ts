@@ -9,15 +9,25 @@ export const app = express();
 
 app.use(express.json());
 
-// Initialize Gemini client server-side
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+// Initialize Gemini client server-side lazily
+let aiClient: GoogleGenAI | null = null;
+function getAi(): GoogleGenAI {
+  if (!aiClient) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      throw new Error("GEMINI_API_KEY is not defined. Please add it to your system settings secrets.");
     }
+    aiClient = new GoogleGenAI({
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
-});
+  return aiClient;
+}
 
 // API Route for server-side Gemini invocation
 app.post("/api/gemini/generate", async (req: express.Request, res: express.Response) => {
@@ -34,7 +44,7 @@ app.post("/api/gemini/generate", async (req: express.Request, res: express.Respo
     const generateContentWithRetry = async (retriesLeft = 3, currentDelay = 1000, activeModel = model || "gemini-3.5-flash"): Promise<any> => {
       try {
         console.log(`[Gemini API] Requesting model: ${activeModel}`);
-        return await ai.models.generateContent({
+        return await getAi().models.generateContent({
           model: activeModel,
           contents: contents,
           config: systemInstruction ? { systemInstruction } : undefined
@@ -639,16 +649,32 @@ async function findSubfolderByAlproCode(accessToken: string, parentFolderId: str
   return null;
 }
 
-// Helper to get all KML files in a parent folder
+// Helper to identify ODC file name (e.g., ODC-XXX-XXX, ODC-MNZ-FA.kml, ODC_MNZ_FA, etc.)
+function isOdcFileName(filename?: string): boolean {
+  if (!filename) return false;
+  const clean = filename.trim().toUpperCase().replace(/\.KML$/i, '');
+  return (
+    clean.startsWith('ODC-') ||
+    clean.startsWith('ODC_') ||
+    /^ODC[-_][A-Z0-9]+[-_][A-Z0-9]+/i.test(clean) ||
+    clean.includes('ODC-') ||
+    clean.includes('ODC_')
+  );
+}
+
+// Helper to get all KML and ODC files in a parent folder
 async function findKmlsInFolder(accessToken: string, folderId: string): Promise<any[]> {
   try {
-    const kmlQuery = `'${folderId}' in parents and name contains '.kml' and trashed = false`;
+    const kmlQuery = `'${folderId}' in parents and (name contains '.kml' or name contains 'ODC-' or name contains 'ODC_') and mimeType != 'application/vnd.google-apps.folder' and trashed = false`;
     const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(kmlQuery)}&fields=files(id,name,size)&pageSize=100`, {
       headers: { 'Authorization': `Bearer ${accessToken}` }
     });
     if (res.ok) {
       const data: any = await res.json();
-      let files = (data.files || []).filter((f: any) => (f.name || "").toLowerCase().endsWith(".kml"));
+      let files = (data.files || []).filter((f: any) => {
+        const name = (f.name || "").toLowerCase();
+        return name.endsWith(".kml") || isOdcFileName(f.name);
+      });
 
       if (files.length === 0) {
         // Check 1 level deeper subfolders if no direct KMLs found
@@ -660,13 +686,16 @@ async function findKmlsInFolder(accessToken: string, folderId: string): Promise<
           const innerData: any = await innerSubRes.json();
           const innerFolders = innerData.files || [];
           for (const fld of innerFolders) {
-            const subKmlQuery = `'${fld.id}' in parents and name contains '.kml' and trashed = false`;
+            const subKmlQuery = `'${fld.id}' in parents and (name contains '.kml' or name contains 'ODC-' or name contains 'ODC_') and mimeType != 'application/vnd.google-apps.folder' and trashed = false`;
             const subKmlRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(subKmlQuery)}&fields=files(id,name,size)`, {
               headers: { 'Authorization': `Bearer ${accessToken}` }
             });
             if (subKmlRes.ok) {
               const subKmlData: any = await subKmlRes.json();
-              const subFiles = (subKmlData.files || []).filter((f: any) => (f.name || "").toLowerCase().endsWith(".kml"));
+              const subFiles = (subKmlData.files || []).filter((f: any) => {
+                const name = (f.name || "").toLowerCase();
+                return name.endsWith(".kml") || isOdcFileName(f.name);
+              });
               files.push(...subFiles);
             }
           }
@@ -683,14 +712,26 @@ async function findKmlsInFolder(accessToken: string, folderId: string): Promise<
 // Helper to filter KML files by checking if they contain search query in name or content
 async function filterKmlsByContent(accessToken: string, kmlFiles: any[], searchQuery: string): Promise<any[]> {
   if (!kmlFiles || kmlFiles.length === 0) return [];
-  if (!searchQuery || !searchQuery.trim()) return kmlFiles;
+
+  // Identify any ODC files (e.g., ODC-XXX-XXX) in this folder - these must ALWAYS be preserved and included in every search!
+  const odcFiles = kmlFiles.filter(f => isOdcFileName(f.name));
+  if (odcFiles.length > 0) {
+    console.log(`[Google Drive Filter] Menemukan ${odcFiles.length} berkas ODC di dalam folder: ${odcFiles.map(f => f.name).join(', ')}`);
+  }
+
+  // Candidate files to filter (excluding ODC files so they are not pruned)
+  const candidateFiles = kmlFiles.filter(f => !isOdcFileName(f.name));
+
+  if (!searchQuery || !searchQuery.trim()) {
+    return kmlFiles;
+  }
 
   const cleanQuery = searchQuery.trim().toUpperCase();
-  console.log(`[Google Drive Filter] Memfilter ${kmlFiles.length} berkas KML dengan kata kunci "${cleanQuery}"...`);
+  console.log(`[Google Drive Filter] Memfilter ${candidateFiles.length} berkas rute kabel dengan kata kunci "${cleanQuery}"...`);
 
   const matchedFiles: any[] = [];
 
-  for (const file of kmlFiles) {
+  for (const file of candidateFiles) {
     if (!file.id || file.id.startsWith("simulated-")) {
       matchedFiles.push(file);
       continue;
@@ -737,8 +778,10 @@ async function filterKmlsByContent(accessToken: string, kmlFiles: any[], searchQ
     }
   }
 
-  console.log(`[Google Drive Filter] Selesai. Menemukan ${matchedFiles.length} dari ${kmlFiles.length} berkas KML yang benar-benar relevan.`);
-  return matchedFiles;
+  // Combine matched cable files with any ODC files found in that folder
+  const finalResult = [...matchedFiles, ...odcFiles];
+  console.log(`[Google Drive Filter] Selesai. Mengembalikan total ${finalResult.length} berkas (${matchedFiles.length} berkas rute kabel + ${odcFiles.length} berkas ODC).`);
+  return finalResult;
 }
 
 // API Route for hierarchical, safe KML file search on Google Drive
@@ -754,7 +797,7 @@ app.post("/api/drive/search-kml", async (req: express.Request, res: express.Resp
     const isTokenValid = await isTokenActive(accessToken);
     if (!isTokenValid) {
       console.error("[Google Drive Search] Autentikasi Gagal: Token tidak aktif atau kedaluwarsa sebelum memulai proses.");
-      return res.status(410).json({ error: "TOKEN_EXPIRED", message: "Google Drive token telah kedaluwarsa" });
+      return res.status(401).json({ error: "TOKEN_EXPIRED", message: "Google Drive token telah kedaluwarsa" });
     }
 
     const alproCode = extractAlproCode(searchName, site, sto);
@@ -1049,6 +1092,12 @@ app.post("/api/drive/search-kml", async (req: express.Request, res: express.Resp
             const kmlFiles = (kmlData.files || []).filter((f: any) => (f.name || "").toLowerCase().endsWith(".kml"));
             console.log(`[Google Drive Search - Distribusi] Ditemukan ${kmlFiles.length} file KML untuk dipindai isinya.`);
             
+            const odcFilesInFolder = kmlFiles.filter((f: any) => {
+              const fn = (f.name || "").trim().toUpperCase();
+              return fn.startsWith("ODC-") || fn.startsWith("ODC_");
+            });
+
+            let folderMatchedFiles: any[] = [];
             for (const file of kmlFiles) {
               console.log(`[Google Drive Search - Distribusi] Mengunduh & memeriksa isi file: "${file.name}" (ID: ${file.id})`);
               try {
@@ -1062,7 +1111,7 @@ app.post("/api/drive/search-kml", async (req: express.Request, res: express.Resp
                                   
                   if (isFound) {
                     console.log(`[Google Drive Search - Distribusi] OK! Kata kunci ditemukan di dalam isi file "${file.name}". Berkas ini akan digunakan.`);
-                    finalMatchedFiles.push(file);
+                    folderMatchedFiles.push(file);
                   } else {
                     console.log(`[Google Drive Search - Distribusi] Kata kunci tidak ditemukan di "${file.name}". Tutup file, lanjut memeriksa file lain...`);
                   }
@@ -1072,6 +1121,20 @@ app.post("/api/drive/search-kml", async (req: express.Request, res: express.Resp
               } catch (readErr) {
                 console.error(`[Google Drive Search - Distribusi Error] Gagal membaca konten KML:`, readErr);
               }
+            }
+
+            if (folderMatchedFiles.length > 0) {
+              finalMatchedFiles.push(...folderMatchedFiles);
+              // Always include ODC files from this subfolder
+              for (const odcFile of odcFilesInFolder) {
+                if (!finalMatchedFiles.some((f: any) => f.id === odcFile.id || f.name === odcFile.name)) {
+                  console.log(`[Google Drive Search - Distribusi] Menyertakan berkas titik ODC "${odcFile.name}" dari subfolder "${folder.name}"`);
+                  finalMatchedFiles.push(odcFile);
+                }
+              }
+            } else if (odcFilesInFolder.length > 0 && kmlFiles.length > 0) {
+              // If none matched exact string but folder was explicitly matched by Alpro, include kmlFiles and odc
+              finalMatchedFiles.push(...kmlFiles);
             }
           }
         }
@@ -1123,11 +1186,24 @@ app.post("/api/drive/search-kml", async (req: express.Request, res: express.Resp
       
       if (finalMatchedFiles.length === 0) {
         console.warn("[Google Drive Search - Distribusi Warning] Berkas KML tidak ditemukan sama sekali di Drive. Menghasilkan KML simulasi.");
-        finalMatchedFiles = [{
+        const simulatedCable = {
           id: `simulated-kml-${Date.now()}`,
           name: `AS_BUILT_DRAWING_${cleanQuery.replace(/[\s/\\?=]+/g, "_")}_SIMULATED.kml`,
           size: "4520"
-        }];
+        };
+        let odcNameSim = "ODC-DISTRIBUSI";
+        const parts = cleanQuery.split(/[\/-]/).filter((p: string) => p.length >= 2);
+        if (parts.length >= 3) {
+          odcNameSim = `ODC-${parts[1]}-${parts[2]}`;
+        } else if (parts.length >= 2) {
+          odcNameSim = `ODC-${parts[0]}-${parts[1]}`;
+        }
+        const simulatedOdc = {
+          id: `simulated-odc-${Date.now()}`,
+          name: `${odcNameSim}_SIMULATED.kml`,
+          size: "1850"
+        };
+        finalMatchedFiles = [simulatedCable, simulatedOdc];
       }
       
       console.log(`[Google Drive Search - Distribusi] Berhasil merampungkan penelusuran. Mengembalikan ${finalMatchedFiles.length} berkas.`);
@@ -1261,8 +1337,29 @@ app.post("/api/drive/search-kml", async (req: express.Request, res: express.Resp
 // API Route for downloading simulated/fallback KML file
 app.get("/api/drive/download-simulated-kml", async (req: express.Request, res: express.Response) => {
   try {
-    const filename = (req.query.filename as string) || "AS_BUILT_DRAWING_SIMULATED.kml";
+    const filename = (req.query.filename as string) || (req.query.name as string) || "AS_BUILT_DRAWING_SIMULATED.kml";
     const titleMatch = filename.replace(/^AS_BUILT_DRAWING_|_SIMULATED\.kml$/gi, "").replace(/_/g, " ");
+
+    if (filename.toUpperCase().startsWith("ODC-") || filename.toUpperCase().includes("_TITIK_ODC")) {
+      const odcTitle = filename.replace(/\.kml$/i, "").replace(/_SIMULATED/gi, "").replace(/_TITIK_ODC/gi, "");
+      const simulatedODCKML = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${odcTitle}</name>
+    <description>Simulated ODC Point generated by M-FOSIS System</description>
+    <Placemark>
+      <name>${odcTitle}</name>
+      <description>Titik Perangkat ODC</description>
+      <Point>
+        <coordinates>106.827153,-6.175392,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>`;
+      res.setHeader("Content-Type", "application/vnd.google.earth.kml+xml");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      return res.send(simulatedODCKML);
+    }
 
     const simulatedKML = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -1316,7 +1413,7 @@ app.post("/api/drive/fetch-photos", async (req: express.Request, res: express.Re
     const isTokenValid = await isTokenActive(accessToken);
     if (!isTokenValid) {
       console.error("[Google Drive Fetch Photos] Autentikasi Gagal: Token tidak aktif atau kedaluwarsa sebelum mengambil foto.");
-      return res.status(410).json({ error: "TOKEN_EXPIRED", message: "Google Drive token telah kedaluwarsa" });
+      return res.status(401).json({ error: "TOKEN_EXPIRED", message: "Google Drive token telah kedaluwarsa" });
     }
 
     console.log(`[Google Drive Fetch Photos] Memulai pencarian foto bukti fisik di Google Drive...`);

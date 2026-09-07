@@ -35,8 +35,14 @@
 }
 
 .marker-target-blink {
+  background: transparent !important;
+  border: none !important;
+  z-index: 99999 !important;
+}
+
+.marker-target-blink > div {
+  transform-origin: center center;
   animation: kmlBlink 0.8s infinite ease-in-out !important;
-  z-index: 99999 !important; /* Pastikan berada di paling atas */
 }
 
 @keyframes kmlOdpBlink {
@@ -46,8 +52,29 @@
 }
 
 .marker-target-odp-blink {
-  animation: kmlOdpBlink 0.8s infinite ease-in-out !important;
+  background: transparent !important;
+  border: none !important;
   z-index: 99999 !important; /* Pastikan berada di paling atas */
+}
+
+.marker-target-odp-blink > div,
+.marker-target-odp-blink-inner {
+  transform-origin: center center;
+  animation: kmlOdpBlink 0.8s infinite ease-in-out !important;
+}
+
+@keyframes custom-ping-anim {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.custom-pulse-icon,
+.custom-odc-icon,
+.custom-odp-icon,
+.custom-sto-icon,
+.custom-jc-icon {
+  background: transparent !important;
+  border: none !important;
 }
 
 /* ==========================================================================

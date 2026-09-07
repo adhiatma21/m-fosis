@@ -4,6 +4,7 @@ export interface TitikSambung {
   lat: string;
   long: string;
   distance?: number;
+  isOdc?: boolean;
 }
 
 export interface EventData {

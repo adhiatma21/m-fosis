@@ -171,10 +171,14 @@ const stoIcon = L.divIcon({
 
 const odcIcon = L.divIcon({
   className: 'custom-odc-icon',
-  html: `<div style="width: 14px; height: 14px; background: #00E5FF; border: 2px solid #FFFFFF; transform: rotate(45deg); box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-  iconSize: [16, 16],
-  iconAnchor: [8, 8],
-  popupAnchor: [0, -8]
+  html: `<div style="position: relative; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
+          <div style="width: 14px; height: 14px; background: #00E5FF; border: 2px solid #FFFFFF; transform: rotate(45deg); box-shadow: 0 2px 5px rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center;">
+            <div style="width: 4px; height: 4px; background: #0891B2; border-radius: 50%;"></div>
+          </div>
+        </div>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
+  popupAnchor: [0, -11]
 });
 
 const odpIcon = L.divIcon({
@@ -198,33 +202,27 @@ const jcIcon = L.divIcon({
 const redPulseIcon = L.divIcon({
   className: 'custom-pulse-icon',
   html: `
-    <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px;">
-      <div style="position: absolute; width: 28px; height: 28px; background: rgba(220, 38, 38, 0.4); border-radius: 50%; animation: custom-ping-anim 1.2s infinite; pointer-events: none;"></div>
-      <div style="position: absolute; width: 18px; height: 18px; background: #DC2626; border: 2px solid #FFFFFF; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: bold; z-index: 10;">🚨</div>
+    <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; transform-origin: center center;">
+      <div style="position: absolute; top: 4px; left: 4px; width: 28px; height: 28px; background: rgba(220, 38, 38, 0.4); border-radius: 50%; animation: custom-ping-anim 1.2s infinite; transform-origin: center center; pointer-events: none;"></div>
+      <div style="position: absolute; top: 9px; left: 9px; width: 18px; height: 18px; background: #DC2626; border: 2px solid #FFFFFF; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: bold; z-index: 10;">🚨</div>
     </div>
-    <style>
-      @keyframes custom-ping-anim {
-        0% { transform: scale(0.6); opacity: 1; }
-        100% { transform: scale(1.6); opacity: 0; }
-      }
-    </style>
   `,
   iconSize: [36, 36],
   iconAnchor: [18, 18],
-  popupAnchor: [0, -9]
+  popupAnchor: [0, -18]
 });
 
 const targetOdpIcon = L.divIcon({
   className: 'marker-target-odp-blink',
   html: `
-    <div style="position: relative; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px;">
-      <div style="position: absolute; width: 28px; height: 28px; background: rgba(16, 185, 129, 0.4); border-radius: 50%; animation: custom-ping-anim 1.2s infinite; pointer-events: none;"></div>
-      <div style="position: absolute; width: 20px; height: 20px; background: #10B981; border: 2px solid #FFFFFF; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; z-index: 10;">⛳️</div>
+    <div class="marker-target-odp-blink-inner" style="position: relative; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; transform-origin: center center;">
+      <div style="position: absolute; top: 4px; left: 4px; width: 28px; height: 28px; background: rgba(16, 185, 129, 0.4); border-radius: 50%; animation: custom-ping-anim 1.2s infinite; transform-origin: center center; pointer-events: none;"></div>
+      <div style="position: absolute; top: 8px; left: 8px; width: 20px; height: 20px; background: #10B981; border: 2px solid #FFFFFF; border-radius: 50%; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; z-index: 10;">⛳️</div>
     </div>
   `,
   iconSize: [36, 36],
   iconAnchor: [18, 18],
-  popupAnchor: [0, -9]
+  popupAnchor: [0, -18]
 });
 
 const normalizeOdpName = (name: string): string => {
@@ -409,6 +407,19 @@ function findCoordinateAtDistance(coords: [number, number][], targetDistMeters: 
   return coords[coords.length - 1];
 }
 
+// Helper to identify ODC file name (e.g., ODC-XXX-XXX, ODC-MNZ-FA.kml, ODC_MNZ_FA, etc.)
+const isOdcFileName = (filename?: string): boolean => {
+  if (!filename) return false;
+  const clean = filename.trim().toUpperCase().replace(/\.KML$/i, '');
+  return (
+    clean.startsWith('ODC-') ||
+    clean.startsWith('ODC_') ||
+    /^ODC[-_][A-Z0-9]+[-_][A-Z0-9]+/i.test(clean) ||
+    clean.includes('ODC-') ||
+    clean.includes('ODC_')
+  );
+};
+
 // Map alpro icon dynamic matching with strict force override and blink support
 const getMarkerIcon = (name: string, isTarget: boolean = false) => {
   const upper = name.toUpperCase();
@@ -436,10 +447,10 @@ const getMarkerIcon = (name: string, isTarget: boolean = false) => {
   if (upper.includes('ODC')) {
     return L.divIcon({
       className: `custom-odc-icon ${blinkClass}`,
-      html: `<div style="width: 14px; height: 14px; background: #00E5FF; border: 2px solid #FFFFFF; transform: rotate(45deg); box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-      iconSize: [16, 16],
-      iconAnchor: [8, 8],
-      popupAnchor: [0, -8]
+      html: `<div style="width: 16px; height: 16px; background: #00E5FF; border: 2px solid #FFFFFF; transform: rotate(45deg); box-shadow: 0 2px 5px rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center;"><span style="transform: rotate(-45deg); color: #0f172a; font-size: 8px; font-weight: 900; line-height: 1;">C</span></div>`,
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+      popupAnchor: [0, -9]
     });
   }
   if (upper.includes('JC') || upper.includes('CLOSURE') || upper.includes('JOINT') || upper.includes('SPLICING') || upper.includes('SPLICE')) {
@@ -546,19 +557,33 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
 // Global memory cache for Google Drive access token with persistency
 let cachedAccessToken: string | null = (() => {
   try {
-    return localStorage.getItem('m_fosis_drive_token');
+    return localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
   } catch (e) {
     return null;
   }
 })();
 let tokenExpiryTime: number | null = (() => {
   try {
-    const val = localStorage.getItem('m_fosis_drive_expiry');
+    const val = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
     return val ? parseInt(val, 10) : null;
   } catch (e) {
     return null;
   }
 })();
+
+export const getStoredValidAccessToken = (): string | null => {
+  try {
+    const token = localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
+    const expiryStr = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
+    const expiry = expiryStr ? parseInt(expiryStr, 10) : null;
+    if (token && (!expiry || Date.now() < expiry)) {
+      return token;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+};
 
 const renderFormattedAiAnalysis = (text: string) => {
   if (!text) return null;
@@ -1074,6 +1099,9 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
         cachedAccessToken = data.access_token;
         const newExpiry = Date.now() + (data.expires_in || 3599) * 1000;
         tokenExpiryTime = newExpiry;
+        // Ketentuan 1: Simpan access_token & expires_at ke localStorage
+        localStorage.setItem('access_token', data.access_token);
+        localStorage.setItem('expires_at', String(newExpiry));
         localStorage.setItem('m_fosis_drive_token', data.access_token);
         localStorage.setItem('m_fosis_drive_expiry', String(newExpiry));
         setDriveToken(data.access_token);
@@ -1089,12 +1117,12 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
 
   const connectGoogleDrive = async (silent: boolean = false) => {
     if (silent) {
-      // Jika silent, jangan panggil signInWithPopup untuk menghindari pemblokiran popup oleh browser
-      const localToken = localStorage.getItem('m_fosis_drive_token');
-      const localExpiry = localStorage.getItem('m_fosis_drive_expiry');
-      if (localToken && localExpiry && Date.now() < parseInt(localExpiry)) {
+      // Jika silent, cek localStorage terlebih dahulu tanpa memicu pop-up browser
+      const localToken = localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
+      const localExpiry = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
+      if (localToken && (!localExpiry || Date.now() < parseInt(localExpiry, 10))) {
         cachedAccessToken = localToken;
-        tokenExpiryTime = parseInt(localExpiry);
+        tokenExpiryTime = localExpiry ? parseInt(localExpiry, 10) : null;
         setDriveToken(localToken);
         return localToken;
       }
@@ -1115,11 +1143,9 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
       provider.addScope('https://www.googleapis.com/auth/drive.metadata.readonly');
       provider.addScope('https://www.googleapis.com/auth/spreadsheets');
       
-      // Memastikan scope 'offline' diminta agar bisa mendapatkan refresh_token
-      const hasRefreshToken = !!localStorage.getItem('m_fosis_drive_refresh_token');
+      // Ketentuan 3: Hapus parameter prompt: 'consent' dari OAuth request
       provider.setCustomParameters({
-        access_type: 'offline',
-        prompt: hasRefreshToken ? 'select_account' : 'consent'
+        access_type: 'offline'
       });
       
       const result = await signInWithPopup(auth, provider);
@@ -1141,6 +1167,9 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
       cachedAccessToken = credential.accessToken;
       tokenExpiryTime = Date.now() + 3500 * 1000; // valid for ~1 hour
       try {
+        // Ketentuan 1: Simpan access_token & expires_at ke localStorage setelah login pertama
+        localStorage.setItem('access_token', credential.accessToken);
+        localStorage.setItem('expires_at', String(tokenExpiryTime));
         localStorage.setItem('m_fosis_drive_token', credential.accessToken);
         localStorage.setItem('m_fosis_drive_expiry', String(tokenExpiryTime));
       } catch (e) {
@@ -1177,28 +1206,103 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
     }
   };
 
+  // Ketentuan 2 & 4: Helper untuk mendapatkan token valid sebelum fetch KML
+  // 1. Cek localStorage ('access_token' & 'expires_at'). Jika valid, langsung kembalikan tanpa OAuth pop-up.
+  // 2. Jika token belum ada/expired, coba silent refresh token via backend.
+  // 3. Hanya panggil pop-up OAuth jika token belum ada/expired dan allowPopup diizinkan.
+  const getValidDriveToken = async (allowPopup: boolean = false): Promise<string | null> => {
+    const localToken = localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
+    const localExpiryStr = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
+    const localExpiry = localExpiryStr ? parseInt(localExpiryStr, 10) : null;
+
+    // Cek localStorage: Jika token masih valid, langsung gunakan tanpa memicu OAuth pop-up!
+    if (localToken && (!localExpiry || Date.now() < localExpiry)) {
+      cachedAccessToken = localToken;
+      tokenExpiryTime = localExpiry;
+      if (driveToken !== localToken) {
+        setDriveToken(localToken);
+      }
+      return localToken;
+    }
+
+    // Jika token belum ada atau expired, coba penyegaran di latar belakang
+    console.log("[Google Drive Auth] Token belum ada atau kedaluwarsa di localStorage, mencoba silent refresh...");
+    const refreshed = await refreshGoogleAccessToken();
+    if (refreshed) {
+      return refreshed;
+    }
+
+    // Ketentuan 4: Hanya panggil pop-up OAuth jika token belum ada/expired
+    if (allowPopup) {
+      console.log("[Google Drive Auth] Memanggil pop-up OAuth karena token belum ada/expired...");
+      return await connectGoogleDrive(false);
+    }
+
+    return null;
+  };
+
   const scanGoogleDriveKml = async () => {
-    if (!driveToken) {
-      setScanKmlError("Google Drive tidak terhubung. Silakan hubungkan Google Drive terlebih dahulu.");
-      return;
+    // Cek token valid terlebih dahulu tanpa pop-up
+    let currentToken = await getValidDriveToken(false);
+    if (!currentToken) {
+      // Hanya panggil pop-up jika token belum ada atau expired
+      currentToken = await connectGoogleDrive(false);
+      if (!currentToken) {
+        setScanKmlError("Google Drive tidak terhubung. Silakan hubungkan Google Drive terlebih dahulu.");
+        return;
+      }
     }
     setIsScanningKml(true);
     setScanKmlError(null);
     try {
       // 1. Fetch all folders
-      const foldersRes = await fetch(
+      let foldersRes = await fetch(
         `https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name,parents)&pageSize=1000`,
-        { headers: { Authorization: `Bearer ${driveToken}` } }
+        { headers: { Authorization: `Bearer ${currentToken}` } }
       );
+      
+      // Ketentuan 4: Jika mendapat response 401, coba refresh latar belakang atau pop-up lalu retry
+      if (!foldersRes.ok && foldersRes.status === 401) {
+        console.warn("Mendapatkan 401 saat scan folder Drive, meminta autentikasi ulang...");
+        let refreshedToken = await refreshGoogleAccessToken();
+        if (!refreshedToken) {
+          refreshedToken = await connectGoogleDrive(false);
+        }
+        if (refreshedToken) {
+          currentToken = refreshedToken;
+          foldersRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name,parents)&pageSize=1000`,
+            { headers: { Authorization: `Bearer ${refreshedToken}` } }
+          );
+        }
+      }
+
       if (!foldersRes.ok) throw new Error("Gagal mengambil daftar folder dari Google Drive");
       const foldersData = await foldersRes.json();
       const folders = foldersData.files || [];
 
       // 2. Fetch KML files
-      const kmlRes = await fetch(
+      let kmlRes = await fetch(
         `https://www.googleapis.com/drive/v3/files?q=name contains '.kml' and trashed=false&fields=files(id,name,size,parents,webViewLink)&pageSize=1000`,
-        { headers: { Authorization: `Bearer ${driveToken}` } }
+        { headers: { Authorization: `Bearer ${currentToken}` } }
       );
+
+      // Ketentuan 4: Jika mendapat response 401 saat fetch berkas KML
+      if (!kmlRes.ok && kmlRes.status === 401) {
+        console.warn("Mendapatkan 401 saat scan berkas KML Drive, meminta autentikasi ulang...");
+        let refreshedToken = await refreshGoogleAccessToken();
+        if (!refreshedToken) {
+          refreshedToken = await connectGoogleDrive(false);
+        }
+        if (refreshedToken) {
+          currentToken = refreshedToken;
+          kmlRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=name contains '.kml' and trashed=false&fields=files(id,name,size,parents,webViewLink)&pageSize=1000`,
+            { headers: { Authorization: `Bearer ${refreshedToken}` } }
+          );
+        }
+      }
+
       if (!kmlRes.ok) throw new Error("Gagal mengambil daftar berkas KML dari Google Drive");
       const kmlData = await kmlRes.json();
       const kmlFiles = kmlData.files || [];
@@ -1299,27 +1403,13 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
     setRuteAiAnalysis('');
  
     try {
-      // 1. PENANGANAN EXPIRY TOKEN
-      let currentToken = driveToken;
-      const isExpired = !tokenExpiryTime || (Date.now() + 300000) > tokenExpiryTime; // Refresh if expired or expiring within 5 minutes
+      // Ketentuan 2 & 4: Cek localStorage terlebih dahulu. Jika token masih valid, langsung gunakan tanpa OAuth pop-up!
+      let currentToken = await getValidDriveToken(false);
       
-      if (!currentToken || isExpired) {
-        console.log("Token expired or missing, attempting background refresh...");
-        try {
-          // Pertama, prioritaskan segarkan lewat Refresh Token backend tanpa ganggu user
-          const refreshed = await refreshGoogleAccessToken();
-          if (refreshed) {
-            currentToken = refreshed;
-          } else {
-            currentToken = await connectGoogleDrive(true);
-          }
-        } catch (refreshErr: any) {
-          console.error("🔄 Silent refresh token failed:", refreshErr);
-          setDriveAutoStatus('error');
-          setDriveAutoError('Sesi mendengarkan Google Drive habis. Silakan hubungkan ulang Google Drive menggunakan tombol di panel sebelah kiri.');
-          setIsDriveLoading(false);
-          return;
-        }
+      // Hanya panggil pop-up OAuth jika token belum ada atau sudah expired
+      if (!currentToken) {
+        console.log("[triggerDriveAutoFetch] Token belum ada atau expired, memicu pop-up OAuth...");
+        currentToken = await connectGoogleDrive(false);
       }
  
       if (!currentToken) {
@@ -1350,7 +1440,8 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
       let response = await fetch("/api/drive/search-kml", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentToken}`
         },
         body: JSON.stringify({
           accessToken: currentToken,
@@ -1361,19 +1452,23 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
         })
       });
 
-      // JIKA TOKEN KEDALUWARSA (401), REFRESH SEGERA & RETRY SEKALI
+      // Ketentuan 4: JIKA MENDAPAT RESPONSE 401, REFRESH / PANGGIL POP-UP OAUTH LALU RETRY
       if (!response.ok && response.status === 401) {
-        console.warn("Mendapatkan 401 saat pencarian KML otomatis, mencoba memperbarui token...");
-        const refreshedToken = await refreshGoogleAccessToken();
+        console.warn("Mendapatkan 401 saat pencarian KML otomatis, mencoba autentikasi ulang...");
+        let refreshedToken = await refreshGoogleAccessToken();
+        if (!refreshedToken) {
+          refreshedToken = await connectGoogleDrive(false);
+        }
         if (refreshedToken) {
           currentToken = refreshedToken;
           response = await fetch("/api/drive/search-kml", {
             method: "POST",
             headers: {
-              "Content-Type": "application/json"
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${currentToken}`
             },
             body: JSON.stringify({
-              accessToken: refreshedToken,
+              accessToken: currentToken,
               segment: jenisKabel,
               searchName: site,
               sto: extractedSTO,
@@ -1427,15 +1522,18 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
               }
             });
 
-            // JIKA TOKEN EXPIRED SAAT DOWNLOAD (401), REFRESH DAN RETRY
+            // Ketentuan 4: JIKA TOKEN EXPIRED SAAT DOWNLOAD (401), REFRESH / POP-UP LALU RETRY
             if (!dlResponse.ok && dlResponse.status === 401) {
-              console.warn("Mendapatkan 401 saat mengunduh berkas KML, mencoba penyegaran token...");
-              const refreshedToken = await refreshGoogleAccessToken();
+              console.warn("Mendapatkan 401 saat mengunduh berkas KML, mencoba autentikasi ulang...");
+              let refreshedToken = await refreshGoogleAccessToken();
+              if (!refreshedToken) {
+                refreshedToken = await connectGoogleDrive(false);
+              }
               if (refreshedToken) {
                 currentToken = refreshedToken;
                 dlResponse = await fetch(downloadUrl, {
                   headers: {
-                    'Authorization': `Bearer ${refreshedToken}`
+                    'Authorization': `Bearer ${currentToken}`
                   }
                 });
               }
@@ -1483,6 +1581,39 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
           };
 
           processFeature(geoJson);
+
+          // Jika berkas adalah file ODC (misal ODC-XXX-XXX), pastikan titik ODC terekstrak dengan benar
+          const cleanFileName = file.name.replace(/\.kml$/i, '').trim();
+          const isOdcFile = isOdcFileName(file.name);
+
+          if (isOdcFile && filePoints.length === 0) {
+            const coordMatch = kmlText.match(/<coordinates>([\s\S]*?)<\/coordinates>/i);
+            if (coordMatch && coordMatch[1]) {
+              const coordParts = coordMatch[1].trim().split(/[\s,]+/);
+              if (coordParts.length >= 2) {
+                const lng = parseFloat(coordParts[0]);
+                const lat = parseFloat(coordParts[1]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  filePoints.push({
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: [lng, lat] },
+                    properties: { name: cleanFileName }
+                  });
+                }
+              }
+            }
+          }
+
+          if (isOdcFile) {
+            filePoints.forEach((p: any) => {
+              if (!p.properties) p.properties = {};
+              p.properties.isOdc = true;
+              const currName = (p.properties.name || '').trim();
+              if (!currName || !currName.toUpperCase().includes('ODC')) {
+                p.properties.name = cleanFileName;
+              }
+            });
+          }
 
           // Unconditionally push lines and points so the KML path is always loaded and shown on the map!
           lines.push(...fileLines);
@@ -1588,9 +1719,10 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
       // Format points as joint closures
       const jointClosures = points.map((p: any, idx: number) => ({
         id: Date.now() + idx,
-        name: p.properties?.name || `Joint Closure ${idx + 1}`,
+        name: p.properties?.name || (p.properties?.isOdc ? 'ODC' : `Joint Closure ${idx + 1}`),
         lat: p.geometry.coordinates[1].toString(),
-        long: p.geometry.coordinates[0].toString()
+        long: p.geometry.coordinates[0].toString(),
+        isOdc: !!p.properties?.isOdc || (p.properties?.name || '').toUpperCase().includes('ODC')
       }));
  
       // Gather coordinates for leaflet viewport
@@ -1824,6 +1956,26 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Sinkronisasi sesi Google Drive dari localStorage saat aplikasi dimuat
+  useEffect(() => {
+    const token = localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
+    const expiryStr = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
+    const expiry = expiryStr ? parseInt(expiryStr, 10) : null;
+
+    if (token) {
+      if (!expiry || Date.now() < expiry) {
+        setDriveToken(token);
+        cachedAccessToken = token;
+        tokenExpiryTime = expiry;
+      } else {
+        const refreshToken = localStorage.getItem('m_fosis_drive_refresh_token');
+        if (refreshToken) {
+          refreshGoogleAccessToken();
+        }
+      }
+    }
+  }, []);
 
   // Firebase Auth & Data Sync (with stored manual session fallback)
   useEffect(() => {
@@ -2072,6 +2224,8 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
     setIsAdmin(false);
     try {
       localStorage.removeItem('m_fosis_logged_user');
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('expires_at');
       localStorage.removeItem('m_fosis_drive_token');
       localStorage.removeItem('m_fosis_drive_expiry');
       localStorage.removeItem('m_fosis_drive_refresh_token');
@@ -2701,27 +2855,12 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
     setAiAnalysis('');
 
     try {
-      let currentToken = driveToken;
-      const isExpired = !tokenExpiryTime || (Date.now() + 300000) > tokenExpiryTime; // Segarkan jika token kedaluwarsa atau sisa waktu kurang dari 5 menit
+      // Ketentuan 2 & 4: Cek localStorage terlebih dahulu. Jika token masih valid, langsung gunakan tanpa OAuth pop-up!
+      let currentToken = await getValidDriveToken(false);
       
-      if (!currentToken || isExpired) {
-        console.log("Token expired or missing, attempting background refresh...");
-        try {
-          // Pertama, prioritaskan penyegaran melalui Refresh Token backend tanpa ganggu user
-          const refreshed = await refreshGoogleAccessToken();
-          if (refreshed) {
-            currentToken = refreshed;
-          } else {
-            currentToken = await connectGoogleDrive(true);
-          }
-        } catch (refreshErr) {
-          console.error("Silent refresh token failed:", refreshErr);
-        }
-      }
-
-      // Jika token masih kosong, coba minta koneksi aktif/interaktif secara langsung karena ini dipicu aksi klik tombol pengguna
+      // Hanya panggil pop-up OAuth jika token belum ada atau sudah expired
       if (!currentToken) {
-        console.log("Token still missing, attempting interactive connection...");
+        console.log("[handleCalculate] Token belum ada atau expired, mencoba koneksi interaktif...");
         try {
           currentToken = await connectGoogleDrive(false);
         } catch (connectErr: any) {
@@ -2757,7 +2896,8 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
       let searchResponse = await fetch("/api/drive/search-kml", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentToken}`
         },
         body: JSON.stringify({
           accessToken: currentToken,
@@ -2768,19 +2908,23 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
         })
       });
 
-      // JIKA TOKEN KEDALUWARSA (401), REFRESH SEGERA & RETRY SEKALI
+      // Ketentuan 4: JIKA MENDAPAT RESPONSE 401, REFRESH / PANGGIL POP-UP OAUTH LALU RETRY
       if (!searchResponse.ok && searchResponse.status === 401) {
-        console.warn("Mendapatkan 401 saat pencarian rute KML, mencoba penyegaran token...");
-        const refreshedToken = await refreshGoogleAccessToken();
+        console.warn("Mendapatkan 401 saat pencarian rute KML, mencoba autentikasi ulang...");
+        let refreshedToken = await refreshGoogleAccessToken();
+        if (!refreshedToken) {
+          refreshedToken = await connectGoogleDrive(false);
+        }
         if (refreshedToken) {
           currentToken = refreshedToken;
           searchResponse = await fetch("/api/drive/search-kml", {
             method: "POST",
             headers: {
-              "Content-Type": "application/json"
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${currentToken}`
             },
             body: JSON.stringify({
-              accessToken: refreshedToken,
+              accessToken: currentToken,
               segment: segmentParam,
               searchName: searchNameParam,
               sto: stoParam,
@@ -2793,6 +2937,8 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
       if (!searchResponse.ok) {
         if (searchResponse.status === 401) {
           setDriveToken(null);
+          cachedAccessToken = null;
+          tokenExpiryTime = null;
           throw new Error('Sesi Google Drive telah habis (401 Unauthorized). Silakan hubungkan ulang.');
         }
         const errData = await searchResponse.json().catch(() => ({}));
@@ -2830,15 +2976,18 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
               }
             });
 
-            // JIKA TOKEN KEDALUWARSA (401) SAAT DOWNLOAD, REFRESH SEGERA & RETRY SEKALI
+            // Ketentuan 4: JIKA TOKEN KEDALUWARSA (401) SAAT DOWNLOAD, REFRESH / POP-UP LALU RETRY
             if (!downloadResponse.ok && downloadResponse.status === 401) {
-              console.warn("Mendapatkan 401 saat mengunduh berkas KML, mencoba penyegaran token...");
-              const refreshedToken = await refreshGoogleAccessToken();
+              console.warn("Mendapatkan 401 saat mengunduh berkas KML, mencoba autentikasi ulang...");
+              let refreshedToken = await refreshGoogleAccessToken();
+              if (!refreshedToken) {
+                refreshedToken = await connectGoogleDrive(false);
+              }
               if (refreshedToken) {
                 currentToken = refreshedToken;
                 downloadResponse = await fetch(downloadUrl, {
                   headers: {
-                    'Authorization': `Bearer ${refreshedToken}`
+                    'Authorization': `Bearer ${currentToken}`
                   }
                 });
               }
@@ -2884,6 +3033,39 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
           };
 
           processFeature(geoJson);
+
+          // Jika berkas adalah file ODC (misal ODC-XXX-XXX), pastikan titik ODC terekstrak dengan benar
+          const cleanFileName = file.name.replace(/\.kml$/i, '').trim();
+          const isOdcFile = isOdcFileName(file.name);
+
+          if (isOdcFile && filePoints.length === 0) {
+            const coordMatch = kmlText.match(/<coordinates>([\s\S]*?)<\/coordinates>/i);
+            if (coordMatch && coordMatch[1]) {
+              const coordParts = coordMatch[1].trim().split(/[\s,]+/);
+              if (coordParts.length >= 2) {
+                const lng = parseFloat(coordParts[0]);
+                const lat = parseFloat(coordParts[1]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  filePoints.push({
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: [lng, lat] },
+                    properties: { name: cleanFileName }
+                  });
+                }
+              }
+            }
+          }
+
+          if (isOdcFile) {
+            filePoints.forEach((p: any) => {
+              if (!p.properties) p.properties = {};
+              p.properties.isOdc = true;
+              const currName = (p.properties.name || '').trim();
+              if (!currName || !currName.toUpperCase().includes('ODC')) {
+                p.properties.name = cleanFileName;
+              }
+            });
+          }
 
           // Unconditionally push lines and points so the KML path is always loaded and shown on the map!
           lines.push(...fileLines);
@@ -2987,9 +3169,10 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
       // Splicing points as joint closures
       const jointClosures = points.map((p: any, idx: number) => ({
         id: Date.now() + idx,
-        name: p.properties?.name || p.properties?.Name || `Joint Closure ${idx + 1}`,
+        name: p.properties?.name || p.properties?.Name || (p.properties?.isOdc ? 'ODC' : `Joint Closure ${idx + 1}`),
         lat: p.geometry.coordinates[1].toString(),
-        long: p.geometry.coordinates[0].toString()
+        long: p.geometry.coordinates[0].toString(),
+        isOdc: !!p.properties?.isOdc || (p.properties?.name || p.properties?.Name || '').toUpperCase().includes('ODC')
       }));
 
       let finalPositions = [...rawCoords];
@@ -3932,23 +4115,26 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
                       ) : false;
 
                       const finalIsTarget = isTarget || isTargetByCoord;
+                      const isOdc = !!pt.isOdc || pt.name.toUpperCase().includes('ODC');
 
                       return (
                         <Marker 
                           key={pt.id}
                           position={[latNum, longNum]}
-                          icon={finalIsTarget ? targetOdpIcon : getMarkerIcon(pt.name, false)}
-                          zIndexOffset={finalIsTarget ? 2000 : 0}
+                          icon={finalIsTarget ? targetOdpIcon : (isOdc ? odcIcon : getMarkerIcon(pt.name, false))}
+                          zIndexOffset={finalIsTarget ? 2000 : (isOdc ? 1500 : 0)}
                         >
                           <Popup>
                             <div className="text-center p-1 font-sans">
                               {finalIsTarget ? (
                                 <p className="font-extrabold text-[11px] text-emerald-600 uppercase tracking-tight">⛳️ {pt.name} (Sasaran)</p>
+                              ) : isOdc ? (
+                                <p className="font-extrabold text-[11px] text-cyan-600 uppercase tracking-tight">🔷 {pt.name} (ODC Hub)</p>
                               ) : (
                                 <p className="font-extrabold text-[11px] text-neutral-800 uppercase tracking-tight">{pt.name}</p>
                               )}
                               {pt.distance !== undefined && (
-                                <p className={`text-[9px] font-extrabold py-0.5 px-1.5 rounded-md mt-1 border inline-block ${finalIsTarget ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                                <p className={`text-[9px] font-extrabold py-0.5 px-1.5 rounded-md mt-1 border inline-block ${finalIsTarget ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : isOdc ? 'bg-cyan-50 text-cyan-700 border-cyan-200' : 'bg-red-50 text-red-600 border-red-100'}`}>
                                   Distance: {pt.distance.toLocaleString('id-ID')}m dari hulu
                                 </p>
                               )}
@@ -4249,11 +4435,7 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
                       type="button"
                       disabled={isDriveLoading}
                       onClick={() => {
-                        if (!driveToken) {
-                          connectGoogleDrive();
-                        } else {
-                          triggerDriveAutoFetch(routeCableType, routeSto, routeSiteAsal);
-                        }
+                        triggerDriveAutoFetch(routeCableType, routeSto, routeSiteAsal);
                       }}
                       className="w-full py-4 md:py-3.5 px-4 bg-red-600 hover:bg-red-700 disabled:bg-neutral-300 text-white font-black text-sm md:text-xs uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                     >
@@ -4570,18 +4752,21 @@ Gunakan bullet points atau penomoran untuk memperjelas poin penting. Teks harus 
                           ) : false;
 
                           const finalIsTarget = isTarget || isTargetByCoord;
+                          const isOdc = !!pt.isOdc || pt.name.toUpperCase().includes('ODC');
 
                           return (
                             <Marker 
                               key={pt.id}
                               position={[latNum, longNum]}
-                              icon={finalIsTarget ? targetOdpIcon : getMarkerIcon(pt.name, false)}
-                              zIndexOffset={finalIsTarget ? 2000 : 0}
+                              icon={finalIsTarget ? targetOdpIcon : (isOdc ? odcIcon : getMarkerIcon(pt.name, false))}
+                              zIndexOffset={finalIsTarget ? 2000 : (isOdc ? 1500 : 0)}
                             >
                               <Popup>
                                 <div className="text-center p-1 font-sans">
                                   {finalIsTarget ? (
                                     <p className="font-extrabold text-[11px] text-emerald-600 uppercase tracking-tight">⛳️ {pt.name} (Sasaran)</p>
+                                  ) : isOdc ? (
+                                    <p className="font-extrabold text-[11px] text-cyan-600 uppercase tracking-tight">🔷 {pt.name} (ODC Hub)</p>
                                   ) : (
                                     <p className="font-extrabold text-[11px] text-neutral-800 uppercase tracking-tight">{pt.name}</p>
                                   )}

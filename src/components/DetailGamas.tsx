@@ -198,6 +198,19 @@ function changeMaterialQty(currentQty: string | number, delta: number): string |
   return Math.max(0, fallbackNum + delta);
 }
 
+// Helper to identify ODC file name (e.g., ODC-XXX-XXX, ODC-MNZ-FA.kml, ODC_MNZ_FA, etc.)
+const isOdcFileName = (filename?: string): boolean => {
+  if (!filename) return false;
+  const clean = filename.trim().toUpperCase().replace(/\.KML$/i, '');
+  return (
+    clean.startsWith('ODC-') ||
+    clean.startsWith('ODC_') ||
+    /^ODC[-_][A-Z0-9]+[-_][A-Z0-9]+/i.test(clean) ||
+    clean.includes('ODC-') ||
+    clean.includes('ODC_')
+  );
+};
+
 const getKmlIconType = (name: string, desc: string): string => {
   const text = `${name || ''} ${desc || ''}`.toLowerCase();
   if (text.includes('odp') || text.includes('disp') || text.includes('distribusi')) return 'odp';
@@ -427,8 +440,9 @@ export default function DetailGamas({
   const [kmlPoints, setKmlPoints] = useState<{lat: number, lng: number, name: string, description: string, properties?: any, matched?: boolean}[]>([]);
 
   const fetchKmlFile = async () => {
-    let token = localStorage.getItem('m_fosis_drive_token');
-    const expiry = localStorage.getItem('m_fosis_drive_expiry');
+    // Ketentuan 2: Cek localStorage (access_token & expires_at)
+    let token = localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
+    const expiry = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
     const refreshToken = localStorage.getItem('m_fosis_drive_refresh_token');
     
     let currentToken = token;
@@ -448,6 +462,9 @@ export default function DetailGamas({
           const refreshData = await refreshRes.json();
           if (refreshData.access_token) {
             const newExpiry = Date.now() + (refreshData.expires_in || 3599) * 1000;
+            // Ketentuan 1: Simpan access_token & expires_at
+            localStorage.setItem('access_token', refreshData.access_token);
+            localStorage.setItem('expires_at', String(newExpiry));
             localStorage.setItem('m_fosis_drive_token', refreshData.access_token);
             localStorage.setItem('m_fosis_drive_expiry', String(newExpiry));
             currentToken = refreshData.access_token;
@@ -474,7 +491,8 @@ export default function DetailGamas({
       const res = await fetch('/api/drive/search-kml', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${activeToken}`
         },
         body: JSON.stringify({
           accessToken: activeToken,
@@ -498,163 +516,196 @@ export default function DetailGamas({
       setKmlFiles(filesList);
 
       if (filesList.length > 0) {
-        const fileId = filesList[0].id;
-        const fileName = filesList[0].name || '';
-        let dlRes;
-
-        if (fileId.startsWith('simulated-')) {
-          const latParam = mappedRecord.latitude !== undefined && mappedRecord.latitude !== null ? mappedRecord.latitude : '';
-          const lngParam = mappedRecord.longitude !== undefined && mappedRecord.longitude !== null ? mappedRecord.longitude : '';
-          dlRes = await fetch(`/api/drive/download-simulated-kml?name=${encodeURIComponent(fileName)}&lat=${latParam}&lng=${lngParam}`);
-        } else {
-          const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-          dlRes = await fetch(dlUrl, {
-            headers: { 'Authorization': `Bearer ${activeToken}` }
-          });
-        }
-
-        if (!dlRes.ok) {
-          if (dlRes.status === 401) {
-            throw { status: 401, message: "Token Expired" };
-          }
-          throw new Error('Gagal mengunduh isi file KML');
-        }
-
-        const kmlText = await dlRes.text();
-        const parser = new DOMParser();
-        const kmlDom = parser.parseFromString(kmlText, 'text/xml');
-        const geoJson = toGeoJSON.kml(kmlDom);
-        
         let parsedCoords: [number, number][] = [];
         const extractedPoints: {lat: number, lng: number, name: string, description: string, rawXmlText?: string, properties?: any, matched?: boolean}[] = [];
-        
-        // 1. Extract LineString coordinates for cable route path
-        const extractRouteCoords = (geometry: any) => {
-          if (!geometry) return;
-          if (geometry.type === 'LineString' || geometry.type === 'MultiLineString') {
-            const coords = geometry.coordinates || [];
-            coords.forEach((c: any) => {
-              const lng = parseFloat(c[0]);
-              const lat = parseFloat(c[1]);
-              if (!isNaN(lat) && !isNaN(lng)) {
-                parsedCoords.push([lat, lng]);
-              }
+
+        for (const fileItem of filesList) {
+          const fileId = fileItem.id;
+          const fileName = fileItem.name || '';
+          let dlRes;
+
+          if (fileId.startsWith('simulated-')) {
+            const latParam = mappedRecord.latitude !== undefined && mappedRecord.latitude !== null ? mappedRecord.latitude : '';
+            const lngParam = mappedRecord.longitude !== undefined && mappedRecord.longitude !== null ? mappedRecord.longitude : '';
+            dlRes = await fetch(`/api/drive/download-simulated-kml?name=${encodeURIComponent(fileName)}&lat=${latParam}&lng=${lngParam}`);
+          } else {
+            const dlUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+            dlRes = await fetch(dlUrl, {
+              headers: { 'Authorization': `Bearer ${activeToken}` }
             });
-          } else if (geometry.type === 'Polygon') {
-            const ring = (geometry.coordinates && geometry.coordinates[0]) || [];
-            ring.forEach((c: any) => {
-              const lng = parseFloat(c[0]);
-              const lat = parseFloat(c[1]);
-              if (!isNaN(lat) && !isNaN(lng)) {
-                parsedCoords.push([lat, lng]);
-              }
-            });
-          } else if (geometry.type === 'GeometryCollection') {
-            (geometry.geometries || []).forEach(extractRouteCoords);
           }
-        };
 
-        const processRouteFeature = (feature: any) => {
-          if (!feature) return;
-          if (feature.type === 'Feature') {
-            extractRouteCoords(feature.geometry);
-          } else if (feature.type === 'FeatureCollection' || Array.isArray(feature.features)) {
-            (feature.features || []).forEach(processRouteFeature);
+          if (!dlRes.ok) {
+            continue;
           }
-        };
-        processRouteFeature(geoJson);
 
-        // 2. Extract Point Placemarks DIRECTLY from KML XML DOM for 100% accurate coordinates & names
-        const placemarkNodes = Array.from(kmlDom.getElementsByTagName('Placemark')).concat(
-          Array.from(kmlDom.getElementsByTagNameNS('*', 'Placemark'))
-        );
-        const uniquePlacemarks = Array.from(new Set(placemarkNodes));
-
-        uniquePlacemarks.forEach(pm => {
-          const pointNodes = Array.from(pm.getElementsByTagName('Point')).concat(
-            Array.from(pm.getElementsByTagNameNS('*', 'Point'))
-          );
-          if (pointNodes.length === 0) return;
-
-          const pointNode = pointNodes[0];
-          const coordNodes = Array.from(pointNode.getElementsByTagName('coordinates')).concat(
-            Array.from(pointNode.getElementsByTagNameNS('*', 'coordinates'))
-          );
-          if (coordNodes.length === 0 || !coordNodes[0].textContent) return;
-
-          const rawCoords = coordNodes[0].textContent.trim();
-          // KML coordinates format in <coordinates>: "longitude,latitude[,elevation]"
-          const parts = rawCoords.split(/[\s,]+/);
-          if (parts.length < 2) return;
-
-          const lng = parseFloat(parts[0]);
-          const lat = parseFloat(parts[1]);
-
-          if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
-
-          const nameNodes = Array.from(pm.getElementsByTagName('name')).concat(
-            Array.from(pm.getElementsByTagNameNS('*', 'name'))
-          );
-          const pmName = nameNodes[0]?.textContent?.trim() || '';
-
-          const descNodes = Array.from(pm.getElementsByTagName('description')).concat(
-            Array.from(pm.getElementsByTagNameNS('*', 'description'))
-          );
-          const pmDesc = descNodes[0]?.textContent?.trim() || '';
-
-          let extText = '';
-          const dataNodes = Array.from(pm.getElementsByTagName('Data')).concat(
-            Array.from(pm.getElementsByTagNameNS('*', 'Data')),
-            Array.from(pm.getElementsByTagName('SimpleData')),
-            Array.from(pm.getElementsByTagNameNS('*', 'SimpleData')),
-            Array.from(pm.getElementsByTagName('value')),
-            Array.from(pm.getElementsByTagNameNS('*', 'value'))
-          );
-          dataNodes.forEach(node => {
-            if (node.textContent) extText += ' ' + node.textContent.trim();
-          });
-
-          extractedPoints.push({
-            lat, // Latitude (index 1)
-            lng, // Longitude (index 0)
-            name: pmName || `Titik ${extractedPoints.length + 1}`,
-            description: pmDesc || 'Titik koordinat terekam dalam file KML',
-            rawXmlText: `${pmName} ${pmDesc} ${extText}`
-          });
-        });
-
-        // Fallback to GeoJSON features if direct XML parser found no point placemarks
-        if (extractedPoints.length === 0) {
-          const processPointFeature = (feature: any) => {
-            if (!feature) return;
-            if (feature.type === 'Feature') {
-              const props = feature.properties || {};
-              const extractPointGeom = (geom: any) => {
-                if (!geom) return;
-                if (geom.type === 'Point' && Array.isArray(geom.coordinates)) {
-                  const lng = parseFloat(geom.coordinates[0]);
-                  const lat = parseFloat(geom.coordinates[1]);
-                  if (!isNaN(lat) && !isNaN(lng)) {
-                    let descText = typeof props.description === 'string' ? props.description : (props.description ? JSON.stringify(props.description) : '');
-                    extractedPoints.push({
-                      lat,
-                      lng,
-                      name: props.name || `Titik ${extractedPoints.length + 1}`,
-                      description: descText || 'Titik koordinat terekam dalam file KML',
-                      properties: props,
-                      rawXmlText: `${props.name || ''} ${descText} ${JSON.stringify(props)}`
-                    });
-                  }
-                } else if (geom.type === 'GeometryCollection' && Array.isArray(geom.geometries)) {
-                  geom.geometries.forEach(extractPointGeom);
+          const kmlText = await dlRes.text();
+          const parser = new DOMParser();
+          const kmlDom = parser.parseFromString(kmlText, 'text/xml');
+          const geoJson = toGeoJSON.kml(kmlDom);
+          
+          // 1. Extract LineString coordinates for cable route path
+          const extractRouteCoords = (geometry: any) => {
+            if (!geometry) return;
+            if (geometry.type === 'LineString' || geometry.type === 'MultiLineString') {
+              const coords = geometry.coordinates || [];
+              coords.forEach((c: any) => {
+                const lng = parseFloat(c[0]);
+                const lat = parseFloat(c[1]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  parsedCoords.push([lat, lng]);
                 }
-              };
-              extractPointGeom(feature.geometry);
-            } else if (feature.type === 'FeatureCollection' || Array.isArray(feature.features)) {
-              (feature.features || []).forEach(processPointFeature);
+              });
+            } else if (geometry.type === 'Polygon') {
+              const ring = (geometry.coordinates && geometry.coordinates[0]) || [];
+              ring.forEach((c: any) => {
+                const lng = parseFloat(c[0]);
+                const lat = parseFloat(c[1]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  parsedCoords.push([lat, lng]);
+                }
+              });
+            } else if (geometry.type === 'GeometryCollection') {
+              (geometry.geometries || []).forEach(extractRouteCoords);
             }
           };
-          processPointFeature(geoJson);
+
+          const processRouteFeature = (feature: any) => {
+            if (!feature) return;
+            if (feature.type === 'Feature') {
+              extractRouteCoords(feature.geometry);
+            } else if (feature.type === 'FeatureCollection' || Array.isArray(feature.features)) {
+              (feature.features || []).forEach(processRouteFeature);
+            }
+          };
+          processRouteFeature(geoJson);
+
+          const isOdcFile = isOdcFileName(fileName);
+          const cleanOdcName = fileName.replace(/\.kml$/i, '').trim();
+
+          // 2. Extract Point Placemarks DIRECTLY from KML XML DOM for 100% accurate coordinates & names
+          const placemarkNodes = Array.from(kmlDom.getElementsByTagName('Placemark')).concat(
+            Array.from(kmlDom.getElementsByTagNameNS('*', 'Placemark'))
+          );
+          const uniquePlacemarks = Array.from(new Set(placemarkNodes));
+          let fileHasPoint = false;
+
+          uniquePlacemarks.forEach(pm => {
+            const pointNodes = Array.from(pm.getElementsByTagName('Point')).concat(
+              Array.from(pm.getElementsByTagNameNS('*', 'Point'))
+            );
+            if (pointNodes.length === 0) return;
+
+            const pointNode = pointNodes[0];
+            const coordNodes = Array.from(pointNode.getElementsByTagName('coordinates')).concat(
+              Array.from(pointNode.getElementsByTagNameNS('*', 'coordinates'))
+            );
+            if (coordNodes.length === 0 || !coordNodes[0].textContent) return;
+
+            const rawCoords = coordNodes[0].textContent.trim();
+            // KML coordinates format in <coordinates>: "longitude,latitude[,elevation]"
+            const parts = rawCoords.split(/[\s,]+/);
+            if (parts.length < 2) return;
+
+            const lng = parseFloat(parts[0]);
+            const lat = parseFloat(parts[1]);
+
+            if (isNaN(lat) || isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
+
+            const nameNodes = Array.from(pm.getElementsByTagName('name')).concat(
+              Array.from(pm.getElementsByTagNameNS('*', 'name'))
+            );
+            let pmName = nameNodes[0]?.textContent?.trim() || '';
+            if (isOdcFile && (!pmName || !pmName.toUpperCase().includes('ODC'))) {
+              pmName = cleanOdcName;
+            }
+
+            const descNodes = Array.from(pm.getElementsByTagName('description')).concat(
+              Array.from(pm.getElementsByTagNameNS('*', 'description'))
+            );
+            const pmDesc = descNodes[0]?.textContent?.trim() || '';
+
+            let extText = '';
+            const dataNodes = Array.from(pm.getElementsByTagName('Data')).concat(
+              Array.from(pm.getElementsByTagNameNS('*', 'Data')),
+              Array.from(pm.getElementsByTagName('SimpleData')),
+              Array.from(pm.getElementsByTagNameNS('*', 'SimpleData')),
+              Array.from(pm.getElementsByTagName('value')),
+              Array.from(pm.getElementsByTagNameNS('*', 'value'))
+            );
+            dataNodes.forEach(node => {
+              if (node.textContent) extText += ' ' + node.textContent.trim();
+            });
+
+            fileHasPoint = true;
+            extractedPoints.push({
+              lat, // Latitude (index 1)
+              lng, // Longitude (index 0)
+              name: pmName || `Titik ${extractedPoints.length + 1}`,
+              description: pmDesc || 'Titik koordinat terekam dalam file KML',
+              rawXmlText: `${pmName} ${pmDesc} ${extText}`
+            });
+          });
+
+          // Fallback to GeoJSON features if direct XML parser found no point placemarks for this file
+          if (!fileHasPoint) {
+            const processPointFeature = (feature: any) => {
+              if (!feature) return;
+              if (feature.type === 'Feature') {
+                const props = feature.properties || {};
+                const extractPointGeom = (geom: any) => {
+                  if (!geom) return;
+                  if (geom.type === 'Point' && Array.isArray(geom.coordinates)) {
+                    const lng = parseFloat(geom.coordinates[0]);
+                    const lat = parseFloat(geom.coordinates[1]);
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                      let descText = typeof props.description === 'string' ? props.description : (props.description ? JSON.stringify(props.description) : '');
+                      let pmName = props.name || `Titik ${extractedPoints.length + 1}`;
+                      if (isOdcFile && (!pmName || !pmName.toUpperCase().includes('ODC'))) {
+                        pmName = cleanOdcName;
+                      }
+                      fileHasPoint = true;
+                      extractedPoints.push({
+                        lat,
+                        lng,
+                        name: pmName,
+                        description: descText || 'Titik koordinat terekam dalam file KML',
+                        properties: props,
+                        rawXmlText: `${props.name || ''} ${descText} ${JSON.stringify(props)}`
+                      });
+                    }
+                  } else if (geom.type === 'GeometryCollection' && Array.isArray(geom.geometries)) {
+                    geom.geometries.forEach(extractPointGeom);
+                  }
+                };
+                extractPointGeom(feature.geometry);
+              } else if (feature.type === 'FeatureCollection' || Array.isArray(feature.features)) {
+                (feature.features || []).forEach(processPointFeature);
+              }
+            };
+            processPointFeature(geoJson);
+          }
+
+          // If ODC file has coordinates but no Placemark Point, extract coordinate directly from raw XML
+          if (isOdcFile && !fileHasPoint) {
+            const coordMatch = kmlText.match(/<coordinates>([\s\S]*?)<\/coordinates>/i);
+            if (coordMatch && coordMatch[1]) {
+              const parts = coordMatch[1].trim().split(/[\s,]+/);
+              if (parts.length >= 2) {
+                const lng = parseFloat(parts[0]);
+                const lat = parseFloat(parts[1]);
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  extractedPoints.push({
+                    lat,
+                    lng,
+                    name: cleanOdcName,
+                    description: 'ODC Hub terdeteksi dalam folder',
+                    rawXmlText: `${cleanOdcName} ODC`
+                  });
+                }
+              }
+            }
+          }
         }
 
         // 3. Mark points matching search query (e.g. ODP-MNZ-FAH/06)
@@ -763,6 +814,8 @@ export default function DetailGamas({
             const refreshData = await refreshRes.json();
             if (refreshData.access_token) {
               const newExpiry = Date.now() + (refreshData.expires_in || 3599) * 1000;
+              localStorage.setItem('access_token', refreshData.access_token);
+              localStorage.setItem('expires_at', String(newExpiry));
               localStorage.setItem('m_fosis_drive_token', refreshData.access_token);
               localStorage.setItem('m_fosis_drive_expiry', String(newExpiry));
               currentToken = refreshData.access_token;
@@ -880,8 +933,8 @@ export default function DetailGamas({
     let isMounted = true;
 
     async function fetchEvidentPhotos() {
-      let token = localStorage.getItem('m_fosis_drive_token');
-      const expiry = localStorage.getItem('m_fosis_drive_expiry');
+      let token = localStorage.getItem('access_token') || localStorage.getItem('m_fosis_drive_token');
+      const expiry = localStorage.getItem('expires_at') || localStorage.getItem('m_fosis_drive_expiry');
       const refreshToken = localStorage.getItem('m_fosis_drive_refresh_token');
       
       let currentToken = token;
@@ -901,6 +954,8 @@ export default function DetailGamas({
             const refreshData = await refreshRes.json();
             if (refreshData.access_token) {
               const newExpiry = Date.now() + (refreshData.expires_in || 3599) * 1000;
+              localStorage.setItem('access_token', refreshData.access_token);
+              localStorage.setItem('expires_at', String(newExpiry));
               localStorage.setItem('m_fosis_drive_token', refreshData.access_token);
               localStorage.setItem('m_fosis_drive_expiry', String(newExpiry));
               currentToken = refreshData.access_token;
@@ -934,7 +989,8 @@ export default function DetailGamas({
         let res = await fetch('/api/drive/fetch-photos', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentToken}`
           },
           body: JSON.stringify({
             accessToken: currentToken,
@@ -958,6 +1014,8 @@ export default function DetailGamas({
               const refreshData = await refreshRes.json();
               if (refreshData.access_token) {
                 const newExpiry = Date.now() + (refreshData.expires_in || 3599) * 1000;
+                localStorage.setItem('access_token', refreshData.access_token);
+                localStorage.setItem('expires_at', String(newExpiry));
                 localStorage.setItem('m_fosis_drive_token', refreshData.access_token);
                 localStorage.setItem('m_fosis_drive_expiry', String(newExpiry));
                 currentToken = refreshData.access_token;
@@ -965,7 +1023,8 @@ export default function DetailGamas({
                 res = await fetch('/api/drive/fetch-photos', {
                   method: 'POST',
                   headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentToken}`
                   },
                   body: JSON.stringify({
                     accessToken: currentToken,
